@@ -1,8 +1,8 @@
-# Motion Keybind
+# Dotwut's MoCapApp
 
 ## Overview
 
-Motion Keybind is a Python application that allows you to map body poses detected by your webcam to keyboard inputs. This innovative tool lets you create custom keybindings using physical poses, making interactions more dynamic and intuitive.
+Dotwut's MoCapApp is a Python application that allows you to map body poses detected by your webcam to keyboard inputs. This innovative tool lets you create custom keybindings using physical poses, making interactions more dynamic and intuitive.
 
 ## Features
 
@@ -83,7 +83,7 @@ sudo apt-get install python3-pyaudio portaudio19-dev
 python main.py
 ```
 
-## Using Motion Keybind
+## Using Dotwut's MoCapApp
 
 ### Pose Capture
 1. Click "Capture Pose" to record a new pose
@@ -122,6 +122,33 @@ python main.py
 4. Push to the branch (`git push origin feature/AmazingFeature`)
 5. Open a Pull Request
 
-## License
+## Copyright and License
 
-Distributed under the MIT License. See `LICENSE` for more information.
+### Copyright Notice
+Copyright © 2024 [Jason Hartman]. All Rights Reserved.
+
+### Licensing
+This project is distributed under the MIT License. 
+
+#### MIT License Summary
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+- The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED.
+
+See the `LICENSE` file for full details.
+
+## Trademark
+Dotwut's MoCapApp™ is a trademark of [Jason Hartman/Dotwut].
+
+## Contact
+
+Name: [Jason Hartman]
+Email: dotwut@dotwut.io
+
+## Attribution
+This software uses the following key technologies:
+- MediaPipe by Google
+- PyQt5
+- OpenCV
+- TensorFlow

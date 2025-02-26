@@ -23,6 +23,12 @@ var/
 *.egg-info/
 .installed.cfg
 *.egg
+poses/*.png
+poses/*.jpg
+poses/*.jpeg
+__pycache__/
+*.py[cod]
+*$py.class
 
 # PyCharm
 .idea/

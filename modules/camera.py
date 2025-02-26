@@ -24,14 +24,18 @@ class CameraThread(QThread):
             # Emit the raw frame for pose detection
             self.raw_frame_ready.emit(frame)
             
-            # Convert to Qt format for display
+            # Try a different approach to color conversion
+            # Convert BGR to RGB directly without intermediate steps
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            
+            # Create QImage without any additional processing
             h, w, ch = rgb_frame.shape
-            qt_image = QImage(rgb_frame.data, w, h, w * ch, QImage.Format_RGB888)
+            bytes_per_line = ch * w
+            qt_image = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
             self.frame_ready.emit(qt_image)
             
         cap.release()
-        
+
     def stop(self):
         self.running = False
         self.wait()

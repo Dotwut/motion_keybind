@@ -1,8 +1,9 @@
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                             QLabel, QPushButton, QGridLayout, QDialog,
-                            QLineEdit, QMessageBox, QTabWidget, QSlider)
-from PyQt5.QtGui import QPixmap, QImage
-from PyQt5.QtCore import Qt, pyqtSlot, QTimer
+                            QLineEdit, QMessageBox, QTabWidget, QSlider,
+                            QStyle, QSystemTrayIcon)
+from PyQt5.QtGui import QPixmap, QImage, QIcon
+from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QPoint
 
 import cv2
 import numpy as np
@@ -19,9 +20,28 @@ from ui.voice_tab import VoiceTab
 
 class MainWindow(QMainWindow):
     def __init__(self):
-        super().__init__()
-        self.setWindowTitle("Motion Keybind")
+        # Use custom window flags to remove default title bar
+        super().__init__(None, Qt.FramelessWindowHint)
+        
+        # Add these flags to allow resizing and keeping the window on top if needed
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        
+        # Tracking variables for window dragging
+        self._dragging = False
+        self._drag_start_position = None
+        
+        # Custom title bar
+        self.setup_custom_titlebar()
+        
+        self.setWindowTitle("Dotwut's MoCapApp")
         self.resize(1000, 700)
+        
+        # Set background color to match the app's dark theme
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #121212;
+            }
+        """)
         
         # Initialize modules
         self.camera_thread = CameraThread()
@@ -30,7 +50,7 @@ class MainWindow(QMainWindow):
         self.voice_listener = VoiceListener()
         
         # State variables
-        self.tracking_enabled = False  # Already set to False by default
+        self.tracking_enabled = False
         self.current_pose_signature = None
         self.capture_mode = False
         self.selected_pose_id = None
@@ -56,12 +76,119 @@ class MainWindow(QMainWindow):
         self.pose_timer = QTimer(self)
         self.pose_timer.timeout.connect(self.check_current_pose)
         self.pose_timer.start(500)
+        
+    def setup_custom_titlebar(self):
+        """Create a custom title bar that matches the app's theme"""
+        # Custom title bar widget
+        self.title_bar = QWidget(self)
+        self.title_bar.setStyleSheet("""
+            QWidget {
+                background-color: #121212;
+                color: #2ECC71;
+                font-weight: bold;
+                padding: 5px 10px;
+            }
+        """)
+        
+        # Title bar layout
+        title_layout = QHBoxLayout(self.title_bar)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # App title
+        self.title_label = QLabel("Dotwut's MoCapApp")
+        title_layout.addWidget(self.title_label)
+        
+        # Minimize, Maximize, Close buttons
+        self.minimize_btn = QPushButton("—")
+        self.maximize_btn = QPushButton("☐")
+        self.close_btn = QPushButton("✕")
+        
+        # Style buttons
+        for btn in [self.minimize_btn, self.maximize_btn, self.close_btn]:
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: transparent;
+                    color: #2ECC71;
+                    border: none;
+                    font-weight: bold;
+                    padding: 0 10px;
+                }
+                QPushButton:hover {
+                    background-color: #2C3E50;
+                }
+            """)
+        
+        # Connect button actions
+        self.minimize_btn.clicked.connect(self.showMinimized)
+        self.maximize_btn.clicked.connect(self.toggle_maximize)
+        self.close_btn.clicked.connect(self.close)
+        
+        # Add buttons to layout
+        title_layout.addStretch()
+        title_layout.addWidget(self.minimize_btn)
+        title_layout.addWidget(self.maximize_btn)
+        title_layout.addWidget(self.close_btn)
+        
+        # Enable mouse tracking and events for dragging
+        self.title_bar.setMouseTracking(True)
+        
+    def toggle_maximize(self):
+        """Toggle between maximized and normal window state"""
+        if self.isMaximized():
+            self.showNormal()
+            self.maximize_btn.setText("☐")
+        else:
+            self.showMaximized()
+            self.maximize_btn.setText("❐")
+    
+    def titlebar_mousePressEvent(self, event):
+        """Handle mouse press on title bar to start dragging"""
+        if event.button() == Qt.LeftButton:
+            # Start dragging
+            self._dragging = True
+            # Store the global cursor position and current window position
+            self._drag_start_position = event.globalPos() - self.pos()
+            event.accept()
+
+    def titlebar_mouseMoveEvent(self, event):
+        """Handle mouse move to drag the window"""
+        if self._dragging:
+            # Move the window based on mouse movement
+            self.move(event.globalPos() - self._drag_start_position)
+            event.accept()
+
+    def titlebar_mouseReleaseEvent(self, event):
+        """Stop dragging when mouse is released"""
+        if event.button() == Qt.LeftButton:
+            self._dragging = False
+            event.accept()
+
+    def toggle_maximize(self):
+        """Toggle between maximized and normal window state"""
+        if self.isMaximized():
+            self.showNormal()
+            self.maximize_btn.setText("☐")
+        else:
+            self.showMaximized()
+            self.maximize_btn.setText("❐")
 
         
     def setup_ui(self):
         # Main widget and layout
         main_widget = QWidget()
         main_layout = QVBoxLayout(main_widget)
+        
+        # Add custom title bar to the main layout
+        main_layout.addWidget(self.title_bar)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Bind mouse events to the title bar
+        self.title_bar.mousePressEvent = self.titlebar_mousePressEvent
+        self.title_bar.mouseMoveEvent = self.titlebar_mouseMoveEvent
+        self.title_bar.mouseReleaseEvent = self.titlebar_mouseReleaseEvent
+        
+        # Rest of the UI setup...
+        self.setCentralWidget(main_widget)
         
         # Tab widget for Movement/Voice tabs
         self.tab_widget = QTabWidget()
@@ -142,6 +269,7 @@ class MainWindow(QMainWindow):
         
         # Add debug mode toggle button
         self.add_debug_mode_toggle()
+        self.setCentralWidget(main_widget)
 
     def add_debug_mode_toggle(self):
         """

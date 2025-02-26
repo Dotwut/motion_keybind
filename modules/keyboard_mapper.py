@@ -20,16 +20,37 @@ class KeyboardMapper(QObject):
         self.load_poses()
         
     def add_mapping(self, pose_name, pose_signature, key_combo, threshold=0.75):
-        """Add a mapping between a pose signature and keys"""
+        """Add a mapping between a pose signature and keys with detailed debugging"""
+        # Debug info about the signature being saved
+        print("\nSAVING NEW POSE:")
+        print(f"Pose Name: {pose_name}")
+        print(f"Key Combo: {key_combo}")
+        print(f"Threshold: {threshold}")
+        print(f"Signature Type: {type(pose_signature)}")
+        print(f"Signature Length: {len(pose_signature) if pose_signature else 'None'}")
+        
+        if pose_signature:
+            print("Signature Points:")
+            for i, point in enumerate(pose_signature):
+                print(f"  Point {i}: {point}")
+        
+        # Create a deep copy to prevent reference issues
+        if pose_signature:
+            saved_signature = [tuple(point) for point in pose_signature]
+        else:
+            saved_signature = None
+        
         pose_id = str(len(self.pose_map))
         self.pose_map[pose_id] = {
             "name": pose_name,
-            "signature": pose_signature,
+            "signature": saved_signature,
             "key_combo": key_combo,
-            "threshold": threshold,  # Add threshold parameter
+            "threshold": threshold,
             "image_path": None
         }
         self.save_poses()
+        
+        print(f"Saved pose with ID: {pose_id}")
         return pose_id
         
     def remove_mapping(self, pose_id):
@@ -89,40 +110,114 @@ class KeyboardMapper(QObject):
 
                 
     def check_pose(self, pose_detector, current_signature):
-        """Check if a pose matches any known mappings and trigger keys"""
+        """Check if a pose matches any known mappings and trigger keys with better debugging"""
+        if not current_signature:
+            print("No current pose signature to check")
+            return None
+        
+        print(f"\nCHECKING CURRENT POSE against {len(self.pose_map)} saved poses")
+        print(f"Current signature type: {type(current_signature)}")
+        print(f"Current signature length: {len(current_signature)}")
+        
         best_match = None
         best_score = 0
         
         for pose_id, pose_data in self.pose_map.items():
-            saved_signature = pose_data["signature"]
-            # Get the custom threshold for this pose, or use default
-            threshold = pose_data.get("threshold", 0.75)
+            saved_signature = pose_data.get("signature")
+            threshold = pose_data.get("threshold", 0.6)
             
-            similarity = pose_detector.compare_poses(current_signature, saved_signature)
+            print(f"\nPose {pose_id} ({pose_data.get('name', 'unnamed')}):")
+            print(f"  Saved signature type: {type(saved_signature)}")
+            print(f"  Saved signature length: {len(saved_signature) if saved_signature else 'None'}")
             
-            if similarity > threshold and similarity > best_score:
-                best_score = similarity
-                best_match = pose_id
+            if not saved_signature:
+                print("  ERROR: No saved signature for this pose")
+                continue
+            
+            # Calculate similarity
+            try:
+                similarity = pose_detector.compare_poses(current_signature, saved_signature)
+                print(f"  Similarity: {similarity:.4f}, Threshold: {threshold:.4f}")
                 
+                if similarity > threshold and similarity > best_score:
+                    best_score = similarity
+                    best_match = pose_id
+            except Exception as e:
+                print(f"  ERROR comparing poses: {str(e)}")
+                continue
+        
         if best_match:
+            print(f"FOUND BEST MATCH: {best_match} with score {best_score:.4f}")
+            # Trigger the key
+            self.key_triggered.emit(self.pose_map[best_match]["key_combo"])
             self.trigger_key(self.pose_map[best_match]["key_combo"])
             return best_match
-            
+        
+        print(f"No matching pose found. Best score was {best_score:.4f}")
         return None
 
         
     def save_poses(self):
-        """Save all pose mappings to file"""
+        """Save all pose mappings to file with proper JSON serialization"""
+        print("\nSAVING POSES TO FILE:")
         config_path = os.path.join(self.poses_dir, "poses.json")
-        with open(config_path, 'w') as f:
-            json.dump(self.pose_map, f)
+        
+        # Prepare a copy of the pose map for serialization
+        serializable_map = {}
+        for pose_id, pose_data in self.pose_map.items():
+            # Create a deep copy
+            pose_copy = pose_data.copy()
             
+            # Convert tuple signatures to lists for JSON serialization
+            if pose_copy.get("signature"):
+                pose_copy["signature"] = [list(point) for point in pose_copy["signature"]]
+                
+            serializable_map[pose_id] = pose_copy
+            
+            print(f"Pose {pose_id} ({pose_data.get('name', 'unnamed')}):")
+            print(f"  Original signature type: {type(pose_data.get('signature'))}")
+            print(f"  Serialized signature type: {type(pose_copy.get('signature'))}")
+        
+        # Save to file
+        try:
+            with open(config_path, 'w') as f:
+                json.dump(serializable_map, f, indent=2)
+            print(f"Successfully saved poses to {config_path}")
+        except Exception as e:
+            print(f"ERROR saving poses: {str(e)}")
+                
     def load_poses(self):
-        """Load pose mappings from file"""
+        """Load pose mappings from file with proper conversion"""
         config_path = os.path.join(self.poses_dir, "poses.json")
+        print(f"\nLOADING POSES FROM: {config_path}")
+        
         if os.path.exists(config_path):
-            with open(config_path, 'r') as f:
-                self.pose_map = json.load(f)
+            try:
+                with open(config_path, 'r') as f:
+                    loaded_map = json.load(f)
+                    
+                # Convert loaded data back to the format we need
+                for pose_id, pose_data in loaded_map.items():
+                    # Convert signature points from lists back to tuples
+                    if pose_data.get("signature"):
+                        pose_data["signature"] = [tuple(point) for point in pose_data["signature"]]
+                        
+                self.pose_map = loaded_map
+                
+                # Debug info
+                print(f"Loaded {len(self.pose_map)} poses:")
+                for pose_id, pose_data in self.pose_map.items():
+                    print(f"  Pose {pose_id} ({pose_data.get('name', 'unnamed')}):")
+                    print(f"  Signature type: {type(pose_data.get('signature'))}")
+                    print(f"  Signature length: {len(pose_data.get('signature', [])) if pose_data.get('signature') else 'None'}")
+                    
+            except Exception as e:
+                print(f"ERROR loading poses: {str(e)}")
+                # Initialize with empty dict if load fails
+                self.pose_map = {}
+        else:
+            print("No poses file found. Starting with empty pose map.")
+            self.pose_map = {}
 
 def validate_keybind(keybind):
     """Validate the entered keybind to ensure it is supported."""

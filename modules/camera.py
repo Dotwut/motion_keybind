@@ -24,11 +24,10 @@ class CameraThread(QThread):
             # Emit the raw frame for pose detection
             self.raw_frame_ready.emit(frame)
             
-            # Try a different approach to color conversion
-            # Convert BGR to RGB directly without intermediate steps
+            # Convert BGR to RGB - this is the critical part for color correction
             rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             
-            # Create QImage without any additional processing
+            # Create QImage
             h, w, ch = rgb_frame.shape
             bytes_per_line = ch * w
             qt_image = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format_RGB888)

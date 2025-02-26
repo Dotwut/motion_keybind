@@ -1,37 +1,20 @@
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
-                            QPushButton, QLineEdit)
+                            QPushButton, QLineEdit, QMessageBox, QSlider)
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt
 
 class PoseEditDialog(QDialog):
-    def __init__(self, pose_id, pose_name, key_combo, image_path, parent=None):
+    def __init__(self, pose_id, pose_name, key_combo, image_path, threshold=0.60, parent=None):
         super().__init__(parent)
         self.pose_id = pose_id
         self.pose_name = pose_name
         self.key_combo = key_combo
         self.image_path = image_path
+        self.threshold = threshold
         
         self.setWindowTitle("Edit Pose")
         self.resize(400, 350)
         self.setup_ui()
-
-        # Add to PoseEditDialog.__init__
-        self.threshold_slider = QSlider(Qt.Horizontal)
-        self.threshold_slider.setMinimum(50)
-        self.threshold_slider.setMaximum(95)
-        threshold = pose_data.get("threshold", 0.75) * 100
-        self.threshold_slider.setValue(int(threshold))
-        self.threshold_value = QLabel(f"{int(threshold)}%")
-        self.threshold_slider.valueChanged.connect(
-            lambda v: self.threshold_value.setText(f"{v}%")
-        )
-
-        # Add to layout
-        threshold_layout = QHBoxLayout()
-        threshold_layout.addWidget(QLabel("Matching Threshold:"))
-        threshold_layout.addWidget(self.threshold_slider)
-        threshold_layout.addWidget(self.threshold_value)
-        layout.addLayout(threshold_layout)
         
     def setup_ui(self):
         layout = QVBoxLayout(self)
@@ -61,6 +44,35 @@ class PoseEditDialog(QDialog):
         self.key_input = QLineEdit(self.key_combo)
         key_layout.addWidget(self.key_input)
         layout.addLayout(key_layout)
+        
+        # Threshold slider - using the whole range for flexibility
+        threshold_layout = QHBoxLayout()
+        threshold_layout.addWidget(QLabel("Matching Threshold:"))
+        self.threshold_slider = QSlider(Qt.Horizontal)
+        
+        # Range from 10% to 90% with proper initial value
+        self.threshold_slider.setMinimum(10)
+        self.threshold_slider.setMaximum(90)
+        
+        # Convert threshold from 0.0-1.0 to percentage for the slider
+        threshold_percent = int(self.threshold * 100)
+        self.threshold_slider.setValue(threshold_percent)
+
+        # Display current value
+        self.threshold_value = QLabel(f"{threshold_percent}%")
+        self.threshold_slider.valueChanged.connect(
+            lambda v: self.threshold_value.setText(f"{v}%")
+        )
+        threshold_layout.addWidget(self.threshold_slider)
+        threshold_layout.addWidget(self.threshold_value)
+        layout.addLayout(threshold_layout)
+        
+        # Add explanation
+        threshold_explanation = QLabel(
+            "Lower values require more precise matching. Higher values are more forgiving."
+        )
+        threshold_explanation.setWordWrap(True)
+        layout.addWidget(threshold_explanation)
         
         # Buttons
         button_layout = QHBoxLayout()

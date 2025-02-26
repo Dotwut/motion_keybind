@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                            QPushButton, QLineEdit, QDialog, QSlider)
+                            QPushButton, QLineEdit, QDialog, QSlider, QMessageBox)
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt, pyqtSignal
 
@@ -11,6 +11,7 @@ class PoseReviewPanel(QWidget):
         super().__init__(parent)
         self.setup_ui()
         self.captured_image = None
+        self.current_signature = None  # Store the pose signature
         
     def setup_ui(self):
         layout = QVBoxLayout(self)
@@ -38,6 +39,29 @@ class PoseReviewPanel(QWidget):
         key_layout.addWidget(self.key_input)
         layout.addLayout(key_layout)
         
+        # Matching threshold slider
+        threshold_layout = QHBoxLayout()
+        threshold_layout.addWidget(QLabel("Matching Threshold:"))
+        self.threshold_slider = QSlider(Qt.Horizontal)
+        self.threshold_slider.setMinimum(10)
+        self.threshold_slider.setMaximum(90)
+        self.threshold_slider.setValue(60)  # Default 60%
+        self.threshold_value = QLabel("60%")
+        self.threshold_slider.valueChanged.connect(
+            lambda v: self.threshold_value.setText(f"{v}%")
+        )
+        threshold_layout.addWidget(self.threshold_slider)
+        threshold_layout.addWidget(self.threshold_value)
+        layout.addLayout(threshold_layout)
+        
+        # Add explanation
+        threshold_explanation = QLabel(
+            "Lower values require more precise matching. Higher values are more forgiving."
+        )
+        threshold_explanation.setWordWrap(True)
+        threshold_explanation.setStyleSheet("color: #AAAAAA; font-style: italic;")
+        layout.addWidget(threshold_explanation)
+        
         # Buttons
         button_layout = QHBoxLayout()
         self.save_btn = QPushButton("Save")
@@ -62,22 +86,6 @@ class PoseReviewPanel(QWidget):
         
         # Initially hide this panel
         self.setVisible(False)
-
-        # Add to PoseReviewPanel setup_ui method
-        threshold_layout = QHBoxLayout()
-        threshold_layout.addWidget(QLabel("Matching Threshold:"))
-        self.threshold_slider = QSlider(Qt.Horizontal)
-        self.threshold_slider.setMinimum(50)
-        self.threshold_slider.setMaximum(95)
-        self.threshold_slider.setValue(75)  # Default 75%
-        self.threshold_value = QLabel("75%")
-        self.threshold_slider.valueChanged.connect(
-            lambda v: self.threshold_value.setText(f"{v}%")
-        )
-        threshold_layout.addWidget(self.threshold_slider)
-        threshold_layout.addWidget(self.threshold_value)
-        layout.addLayout(threshold_layout)
-        
         
     def set_captured_image(self, pixmap):
         # Create a deep copy of the pixmap to prevent it from being garbage collected
@@ -119,6 +127,7 @@ class PoseReviewPanel(QWidget):
         self.name_input.clear()
         self.key_input.clear()
         self.image_preview.clear()
+        self.current_signature = None  # Clear the stored signature
         self.setVisible(False)
         
     def handle_voice_command(self, command):

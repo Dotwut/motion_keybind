@@ -1,7 +1,17 @@
 import sys
 import os
+import logging
+import tensorflow as tf
 from PyQt5.QtWidgets import QApplication
 from ui.main_window import MainWindow
+
+# Suppress TensorFlow warnings and logging
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # 0=all, 1=INFO, 2=WARNING, 3=ERROR
+logging.getLogger('tensorflow').setLevel(logging.ERROR)
+tf.get_logger().setLevel(logging.ERROR)
+
+# Suppress MediaPipe logging
+logging.getLogger('mediapipe').setLevel(logging.ERROR)
 
 def main():
     # Create poses directory if it doesn't exist

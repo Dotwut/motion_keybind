@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                             QLabel, QPushButton, QGridLayout, QDialog,
-                            QLineEdit, QMessageBox, QTabWidget)
+                            QLineEdit, QMessageBox, QTabWidget, QSlider)
 from PyQt5.QtGui import QPixmap, QImage
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer
 
@@ -139,25 +139,69 @@ class MainWindow(QMainWindow):
         self.match_label = QLabel("Match: --")
         self.match_label.setStyleSheet("color: white; background-color: #333333; padding: 5px;")
         movement_layout.addWidget(self.match_label)
+        
+        # Add debug mode toggle button
+        self.add_debug_mode_toggle()
 
+    def add_debug_mode_toggle(self):
+        """
+        Add a debug mode toggle button to the control layout
+        """
+        self.debug_mode = False
+        
+        # Create debug button
+        self.debug_btn = QPushButton("Enable Debug Mode")
+        self.debug_btn.clicked.connect(self.toggle_debug_mode)
+        
+        # Find the control layout and add the button
+        for i in range(self.centralWidget().layout().count()):
+            item = self.centralWidget().layout().itemAt(i)
+            if isinstance(item.layout(), QHBoxLayout):
+                # Found a horizontal layout, likely the control layout
+                item.layout().addWidget(self.debug_btn)
+                break
+
+    def toggle_debug_mode(self):
+        """
+        Toggle debug visualization mode
+        """
+        self.debug_mode = not self.debug_mode
+        
+        if self.debug_mode:
+            self.debug_btn.setText("Disable Debug Mode")
+        else:
+            self.debug_btn.setText("Enable Debug Mode")
+
+# Updates for MainWindow update_match_percentage method
     def update_match_percentage(self):
+        """Update the match percentage display for the selected pose"""
         if not self.current_pose_signature or not self.selected_pose_id:
             self.match_label.setText("Match: --")
+            self.match_label.setStyleSheet("color: white; background-color: #333333; padding: 5px;")
             return
-            
+                
         pose_data = self.keyboard_mapper.pose_map.get(self.selected_pose_id)
-        if not pose_data or "signature" not in pose_data:
+        if not pose_data or "signature" not in pose_data or not pose_data["signature"]:
+            self.match_label.setText("Match: --")
+            self.match_label.setStyleSheet("color: white; background-color: #333333; padding: 5px;")
             return
-            
+                
+        # Get the threshold for this specific pose
+        threshold = pose_data.get("threshold", 0.60)
+        
+        # Calculate similarity
         similarity = self.pose_detector.compare_poses(
             self.current_pose_signature, 
             pose_data["signature"]
         )
         
-        self.match_label.setText(f"Match: {int(similarity * 100)}%")
+        # Update the match percentage text
+        match_percent = int(similarity * 100)
+        threshold_percent = int(threshold * 100)
+        self.match_label.setText(f"Match: {match_percent}% (Threshold: {threshold_percent}%)")
         
         # Update color based on match quality
-        if similarity > pose_data.get("threshold", 0.75):
+        if similarity > threshold:
             self.match_label.setStyleSheet("color: white; background-color: #4CAF50; padding: 5px;")
         else:
             self.match_label.setStyleSheet("color: white; background-color: #333333; padding: 5px;")
@@ -189,7 +233,9 @@ class MainWindow(QMainWindow):
                 pose_data["key_combo"],
                 pose_data.get("image_path")
             )
+            # Connect both signals to their handlers
             pose_widget.selected.connect(self.on_pose_selected)
+            pose_widget.double_clicked.connect(self.on_pose_double_clicked)
             
             self.pose_grid.addWidget(pose_widget, row, col)
             
@@ -201,7 +247,8 @@ class MainWindow(QMainWindow):
     
     @pyqtSlot(object)
     def update_frame(self, frame):
-        """Update the camera view with the processed frame"""
+        """Update the camera view with the processed frame (already in RGB format)"""
+        # The frame should already be in RGB format from the pose_detector
         h, w, ch = frame.shape
         bytes_per_line = ch * w
         qt_image = QImage(frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
@@ -213,6 +260,10 @@ class MainWindow(QMainWindow):
         """Process detected pose landmarks"""
         # Update current pose signature
         self.current_pose_signature = self.pose_detector.get_current_pose_signature()
+        
+        # If a pose is selected, update the match percentage display
+        if self.selected_pose_id:
+            self.update_match_percentage()
     
     # Modify check_current_pose
     def check_current_pose(self):
@@ -249,27 +300,56 @@ class MainWindow(QMainWindow):
     
     def capture_pose(self):
         """Capture the current pose for review"""
+        # First ensure we have a valid pose signature
         if not self.current_pose_signature:
-            QMessageBox.warning(self, "Warning", "No pose detected!")
-            return
+            # Try to get a fresh signature
+            self.current_pose_signature = self.pose_detector.get_current_pose_signature()
             
+        if not self.current_pose_signature:
+            QMessageBox.warning(self, "Warning", "No pose detected! Please make sure your full body is visible in the camera.")
+            return
+                
         # Get current frame from camera view and make a deep copy
         current_pixmap = QPixmap(self.camera_view.pixmap())
         if current_pixmap:
+            # Store the current pose signature with the review panel
+            self.pose_review.current_signature = self.current_pose_signature
+            
             # Show the review panel with the captured image
             self.pose_review.set_captured_image(current_pixmap)
+        else:
+            QMessageBox.warning(self, "Error", "Failed to capture camera image.")
 
-    
-    def save_reviewed_pose(self, pose_name, key_combo, threshold=0.75):
-        """Save a pose after review"""
-        if not self.current_pose_signature:
+    def save_reviewed_pose(self, pose_name, key_combo, threshold=0.60):
+        """Save a pose after review with extra debugging"""
+        print("\nSAVING REVIEWED POSE:")
+        print(f"Name: {pose_name}, Key combo: {key_combo}, Threshold: {threshold}")
+        
+        # Use the signature stored in the pose_review panel
+        signature = getattr(self.pose_review, 'current_signature', None)
+        
+        if not signature:
+            # Fallback to the current signature
+            signature = self.current_pose_signature
+            
+        print(f"Signature source: {'pose_review panel' if getattr(self.pose_review, 'current_signature', None) else 'current_pose_signature'}")
+        print(f"Signature type: {type(signature)}")
+        print(f"Signature available: {'Yes' if signature else 'No'}")
+        
+        if signature:
+            print(f"Signature length: {len(signature)}")
+            print("Signature points:")
+            for i, point in enumerate(signature):
+                print(f"  Point {i}: {point}")
+        
+        if not signature:
             QMessageBox.warning(self, "Warning", "Pose data lost! Please recapture.")
             return
-            
+                
         # Create poses directory if it doesn't exist
         if not os.path.exists("poses"):
             os.makedirs("poses")
-            
+                
         # Generate a unique filename
         image_path = f"poses/pose_{len(self.keyboard_mapper.pose_map)}.png"
         
@@ -282,7 +362,7 @@ class MainWindow(QMainWindow):
             # Add mapping
             pose_id = self.keyboard_mapper.add_mapping(
                 pose_name,
-                self.current_pose_signature,
+                signature,  # Use the stored signature
                 key_combo,
                 threshold
             )
@@ -354,22 +434,36 @@ class MainWindow(QMainWindow):
     def on_pose_selected(self, pose_id):
         """Handle pose selection in the grid"""
         self.selected_pose_id = pose_id
+        print(f"MainWindow: Pose selected: {pose_id}")
+        # Update the match percentage display
+        self.update_match_percentage()
+
+    def on_pose_double_clicked(self, pose_id):
+        """Handle pose double-click in the grid"""
+        self.selected_pose_id = pose_id
+        print(f"MainWindow: Pose double-clicked: {pose_id}")
+        # Open the edit dialog
+        self.edit_selected_pose()
     
     def edit_selected_pose(self):
         """Edit the selected pose"""
-        if not hasattr(self, 'selected_pose_id') or not self.selected_pose_id:
+        if not self.selected_pose_id:
             QMessageBox.warning(self, "Warning", "No pose selected!")
             return
-            
+                
         pose_data = self.keyboard_mapper.pose_map.get(self.selected_pose_id)
         if not pose_data:
             return
-            
+                
+        # Get the threshold from pose_data or use default 0.60
+        threshold = pose_data.get("threshold", 0.60)
+        
         dialog = PoseEditDialog(
             self.selected_pose_id,
             pose_data["name"],
             pose_data["key_combo"],
             pose_data.get("image_path"),
+            threshold,  # Pass the threshold to the dialog
             self
         )
         
@@ -386,18 +480,25 @@ class MainWindow(QMainWindow):
             
             # Reload the grid
             self.load_saved_poses()
+            
+            # Update the match percentage display if this is the currently selected pose
+            if self.selected_pose_id == updated_data["pose_id"]:
+                self.update_match_percentage()
 
         # Add to MainWindow
     def mousePressEvent(self, event):
         """Handle mouse clicks on the main window to deselect poses"""
-        # Clear selected pose when clicking outside pose widgets
-        self.selected_pose_id = None
-        # Update all pose widgets to remove selection styling
-        for i in range(self.pose_grid.count()):
-            widget = self.pose_grid.itemAt(i).widget()
-            if isinstance(widget, PoseWidget):
-                widget.is_selected = False
-                widget.remove_highlight()
+        # Only deselect if clicking on the window itself, not on a widget
+        if event.pos().y() > self.pose_grid.geometry().bottom() or event.pos().y() < self.pose_grid.geometry().top():
+            # Clear selected pose when clicking outside pose widgets
+            self.selected_pose_id = None
+            # Update all pose widgets to remove selection styling
+            for i in range(self.pose_grid.count()):
+                widget = self.pose_grid.itemAt(i).widget()
+                if isinstance(widget, PoseWidget):
+                    widget.is_selected = False
+                    widget.update_styling()
+        
         super().mousePressEvent(event)
 
     def delete_selected_pose(self):

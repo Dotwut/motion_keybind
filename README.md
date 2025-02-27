@@ -1,5 +1,7 @@
 # Dotwut's MoCapApp
 
+![image](https://github.com/user-attachments/assets/953749a9-0810-4b7c-95e7-c0962a89f044)
+
 ## Overview
 
 Dotwut's MoCapApp is a Python application that allows you to map body poses detected by your webcam to keyboard inputs. This innovative tool lets you create custom keybindings using physical poses, making interactions more dynamic and intuitive.

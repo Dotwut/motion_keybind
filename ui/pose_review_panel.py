@@ -1,10 +1,11 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-                            QPushButton, QLineEdit, QDialog, QSlider, QMessageBox)
+                            QPushButton, QLineEdit, QDialog, QSlider, QMessageBox,
+                            QCheckBox, QSpinBox, QDoubleSpinBox)
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt, pyqtSignal
 
 class PoseReviewPanel(QWidget):
-    save_pose = pyqtSignal(str, str, float)  # name, key_combo, threshold
+    save_pose = pyqtSignal(str, str, float, int, bool, float)  # name, key_combo, threshold, recognition_speed, immediate_release, sustained_duration
     cancel_capture = pyqtSignal()
     
     def __init__(self, parent=None):
@@ -54,9 +55,44 @@ class PoseReviewPanel(QWidget):
         threshold_layout.addWidget(self.threshold_value)
         layout.addLayout(threshold_layout)
         
+        # Recognition Speed
+        speed_layout = QHBoxLayout()
+        speed_layout.addWidget(QLabel("Recognition Speed (ms):"))
+        self.speed_input = QSpinBox()
+        self.speed_input.setRange(100, 2000)
+        self.speed_input.setSingleStep(50)
+        self.speed_input.setValue(500)  # Default 500ms
+        speed_layout.addWidget(self.speed_input)
+        layout.addLayout(speed_layout)
+        
+        # Immediate Release Option
+        release_layout = QHBoxLayout()
+        self.immediate_release_check = QCheckBox("Immediate Key Release")
+        self.immediate_release_check.setChecked(True)
+        release_layout.addWidget(self.immediate_release_check)
+        layout.addLayout(release_layout)
+        
+        # Sustained Duration
+        duration_layout = QHBoxLayout()
+        duration_layout.addWidget(QLabel("Sustained Key Duration (seconds):"))
+        self.duration_input = QDoubleSpinBox()
+        self.duration_input.setRange(0, 10)
+        self.duration_input.setSingleStep(0.1)
+        self.duration_input.setValue(0)
+        self.duration_input.setEnabled(False)
+        duration_layout.addWidget(self.duration_input)
+        layout.addLayout(duration_layout)
+        
+        # Enable/Disable duration input based on immediate release
+        self.immediate_release_check.toggled.connect(
+            lambda checked: self.duration_input.setEnabled(not checked)
+        )
+        
         # Add explanation
         threshold_explanation = QLabel(
-            "Lower values require more precise matching. Higher values are more forgiving."
+            "Lower threshold requires more precise matching. "
+            "Recognition speed controls pose check frequency. "
+            "Uncheck immediate release to hold key for a set duration."
         )
         threshold_explanation.setWordWrap(True)
         threshold_explanation.setStyleSheet("color: #AAAAAA; font-style: italic;")
@@ -98,6 +134,9 @@ class PoseReviewPanel(QWidget):
         name = self.name_input.text()
         key_combo = self.key_input.text()
         threshold = self.threshold_slider.value() / 100.0
+        recognition_speed = self.speed_input.value()
+        immediate_release = self.immediate_release_check.isChecked()
+        sustained_duration = self.duration_input.value()
         
         if not name:
             name = "Unnamed Pose"
@@ -112,7 +151,14 @@ class PoseReviewPanel(QWidget):
             QMessageBox.warning(self, "Invalid Keybind", message)
             return
             
-        self.save_pose.emit(name, key_combo, threshold)
+        self.save_pose.emit(
+            name, 
+            key_combo, 
+            threshold, 
+            recognition_speed, 
+            immediate_release, 
+            sustained_duration
+        )
         self.clear()
         
     def on_cancel(self):

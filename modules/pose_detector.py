@@ -101,53 +101,70 @@ class PoseDetector(QObject):
     # Replace these two methods in your PoseDetector class
 
     def get_current_pose_signature(self):
-        """Generate a simple, reliable signature for the current pose"""
+        """Generate a comprehensive pose signature using multiple body regions"""
         if not self.current_landmarks:
             return None
-                
-        # Key body parts - focusing on upper body which is most commonly visible
-        key_points = [11, 12, 13, 14, 15, 16]  # shoulders, elbows, wrists
+        
+        # Define key body regions with their corresponding landmark indices
+        body_regions = {
+            'shoulders': [11, 12],  # Left and right shoulders
+            'torso': [23, 24, 11, 12],  # Left and right hip, left and right shoulder
+            'arms': [13, 14, 15, 16],  # Left and right elbows, wrists
+            'hands': [15, 16, 19, 20],  # Wrists and hand landmarks
+            'legs': [23, 24, 25, 26],  # Left and right hip, knee
+            'feet': [27, 28, 31, 32]   # Left and right ankle, heel
+        }
         
         # Collect valid landmarks
         valid_points = []
-        for point_id in key_points:
-            if point_id in self.current_landmarks and self.current_landmarks[point_id]['visibility'] > 0.5:
-                valid_points.append(point_id)
         
-        # Need at least 4 points for a reasonable pose
-        if len(valid_points) < 4:
-            print(f"Not enough landmarks visible: {len(valid_points)}/{len(key_points)}")
-            return None
-        
-        # Check if shoulders are visible - needed for normalization
-        if 11 not in valid_points or 12 not in valid_points:
+        # Check for shoulders (reference points)
+        if 11 not in self.current_landmarks or 12 not in self.current_landmarks:
             print("Shoulders not clearly visible")
             return None
         
-        # Use shoulders as reference
+        # Calculate body center and scale using shoulders
         left_shoulder = (self.current_landmarks[11]['x'], self.current_landmarks[11]['y'])
         right_shoulder = (self.current_landmarks[12]['x'], self.current_landmarks[12]['y'])
         
-        # Calculate body center and scale
         center_x = (left_shoulder[0] + right_shoulder[0]) / 2
         center_y = (left_shoulder[1] + right_shoulder[1]) / 2
         shoulder_width = np.sqrt((left_shoulder[0] - right_shoulder[0])**2 + 
                                 (left_shoulder[1] - right_shoulder[1])**2)
         
-        # Create normalized pose signature
+        # Collect landmarks from all body regions with sufficient visibility
         signature = []
-        for point_id in sorted(valid_points):
-            point = (self.current_landmarks[point_id]['x'], self.current_landmarks[point_id]['y'])
-            # Normalize relative to body center and scale
-            norm_x = (point[0] - center_x) / shoulder_width
-            norm_y = (point[1] - center_y) / shoulder_width
-            signature.append((norm_x, norm_y))
+        total_landmarks_used = 0
         
-        print(f"Created pose signature with {len(signature)} points")
+        for region, landmarks in body_regions.items():
+            region_points = []
+            for landmark_id in landmarks:
+                if (landmark_id in self.current_landmarks and 
+                    self.current_landmarks[landmark_id]['visibility'] > 0.5):
+                    point = (self.current_landmarks[landmark_id]['x'], 
+                            self.current_landmarks[landmark_id]['y'])
+                    
+                    # Normalize relative to body center and scale
+                    norm_x = (point[0] - center_x) / shoulder_width
+                    norm_y = (point[1] - center_y) / shoulder_width
+                    
+                    region_points.append((norm_x, norm_y))
+            
+            # If we have at least half the landmarks for a region, include it
+            if len(region_points) >= len(landmarks) / 2:
+                signature.extend(region_points)
+                total_landmarks_used += len(region_points)
+        
+        # Ensure we have a meaningful number of points
+        if total_landmarks_used < 10:
+            print(f"Not enough landmarks detected: {total_landmarks_used}")
+            return None
+        
+        print(f"Created comprehensive pose signature with {total_landmarks_used} points")
         return signature
 
     def compare_poses(self, pose1, pose2):
-        """Simple comparison between two poses with a more forgiving similarity calculation"""
+        """Enhanced pose comparison with more sophisticated similarity calculation"""
         # Basic validation
         if pose1 is None or pose2 is None:
             print("Cannot compare: One or both pose signatures are None")
@@ -164,9 +181,22 @@ class PoseDetector(QObject):
         # Account for different numbers of points
         common_len = min(len(pose1), len(pose2))
         
-        # Calculate distances between points
+        # Calculate distances between points with region-based weighting
         total_dist = 0.0
         valid_points = 0
+        weighted_dist = 0.0
+        
+        # Define region weights (you can adjust these)
+        region_weights = {
+            0: 1.0,  # First points (e.g., shoulders)
+            1: 1.0,
+            2: 1.2,  # Torso points might be more important
+            3: 1.2,
+            4: 1.1,  # Arms slightly less critical
+            5: 1.1,
+            6: 0.9,  # Hands and extremities less critical
+            7: 0.9
+        }
         
         for i in range(common_len):
             try:
@@ -177,7 +207,13 @@ class PoseDetector(QObject):
                 if len(p1) != 2 or len(p2) != 2:
                     continue
                     
+                # Calculate Euclidean distance
                 dist = np.sqrt((p1[0] - p2[0])**2 + (p1[1] - p2[1])**2)
+                
+                # Apply region-based weighting
+                weight = region_weights.get(i, 1.0)
+                weighted_dist += dist * weight
+                
                 total_dist += dist
                 valid_points += 1
             except Exception as e:
@@ -188,26 +224,25 @@ class PoseDetector(QObject):
         if valid_points == 0:
             return 0.0
         
+        # Calculate average distances
         avg_dist = total_dist / valid_points
+        avg_weighted_dist = weighted_dist / valid_points
         
-        # NEW MORE FORGIVING FORMULA:
-        # This formula gives higher similarity values:
-        # - Distance of 0.1 gives similarity of ~95%
-        # - Distance of 0.2 gives similarity of ~86%
-        # - Distance of 0.3 gives similarity of ~77%
-        # - Distance of 0.5 gives similarity of ~62%
-        similarity = 1.0 / (1.0 + 5.0 * avg_dist)
+        # More sophisticated similarity calculation
+        # Prioritize lower distances and apply a non-linear transformation
+        similarity = 1.0 / (1.0 + 4.0 * avg_weighted_dist)
         
-        # Apply a curve to enhance similarities in the upper range
-        # This will push good matches (>0.6) even higher
+        # Apply a curve to enhance similarities
         if similarity > 0.6:
-            # Apply a slight boost to higher similarities
-            # This raises 0.6 to ~0.7, 0.7 to ~0.8, 0.8 to ~0.9
             similarity = 0.6 + (similarity - 0.6) * 1.5
-            # Clamp to max of 1.0
             similarity = min(similarity, 1.0)
         
-        print(f"Pose comparison: Average distance={avg_dist:.4f}, similarity={similarity:.4f}")
+        print(f"Pose comparison:")
+        print(f"  Total points: {valid_points}")
+        print(f"  Average distance: {avg_dist:.4f}")
+        print(f"  Weighted distance: {avg_weighted_dist:.4f}")
+        print(f"  Similarity: {similarity:.4f}")
+        
         return similarity
     
     def visualize_pose_signature(frame, signature, color=(0, 255, 0), thickness=2):
@@ -317,3 +352,51 @@ class PoseDetector(QObject):
         qt_image = QImage(frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
         self.camera_view.setPixmap(QPixmap.fromImage(qt_image).scaled(
             self.camera_view.size(), Qt.KeepAspectRatio))
+        
+    def check_pose(self, pose_detector, current_signature):
+        print("\n--- CHECKING CURRENT POSE ---")
+        print(f"Current signature available: {current_signature is not None}")
+        
+        if not current_signature:
+            print("No current pose signature to check")
+            return None
+        
+        print(f"\nCHECKING CURRENT POSE against {len(self.pose_map)} saved poses")
+        print(f"Current signature type: {type(current_signature)}")
+        print(f"Current signature length: {len(current_signature)}")
+        
+        best_match = None
+        best_score = 0
+        
+        for pose_id, pose_data in self.pose_map.items():
+            saved_signature = pose_data.get("signature")
+            threshold = pose_data.get("threshold", 0.6)
+            
+            print(f"\nPose {pose_id} ({pose_data.get('name', 'unnamed')}):")
+            print(f"  Saved signature type: {type(saved_signature)}")
+            print(f"  Saved signature length: {len(saved_signature) if saved_signature else 'None'}")
+            
+            if not saved_signature:
+                print("  ERROR: No saved signature for this pose")
+                continue
+            
+            # Calculate similarity
+            try:
+                similarity = pose_detector.compare_poses(current_signature, saved_signature)
+                print(f"  Similarity: {similarity:.4f}, Threshold: {threshold:.4f}")
+                
+                if similarity > threshold and similarity > best_score:
+                    best_score = similarity
+                    best_match = pose_id
+                    print(f"  NEW BEST MATCH: {best_match} with score {best_score:.4f}")
+            except Exception as e:
+                print(f"  ERROR comparing poses: {str(e)}")
+                continue
+        
+        if best_match:
+            print(f"FOUND BEST MATCH: {best_match} with score {best_score:.4f}")
+            print(f"Triggering key: {self.pose_map[best_match]['key_combo']}")
+            return best_match
+        
+        print(f"No matching pose found. Best score was {best_score:.4f}")
+        return None

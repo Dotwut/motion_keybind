@@ -75,7 +75,7 @@ class MainWindow(QMainWindow):
         # Setup pose checking timer (checks every 500ms)
         self.pose_timer = QTimer(self)
         self.pose_timer.timeout.connect(self.check_current_pose)
-        self.pose_timer.start(500)
+        self.pose_timer.start(800)
         
     def setup_custom_titlebar(self):
         """Create a custom title bar that matches the app's theme"""
@@ -373,6 +373,7 @@ class MainWindow(QMainWindow):
                 col = 0
                 row += 1
     
+    
     @pyqtSlot(object)
     def update_frame(self, frame):
         """Update the camera view with the processed frame (already in RGB format)"""
@@ -396,16 +397,20 @@ class MainWindow(QMainWindow):
     # Modify check_current_pose
     def check_current_pose(self):
         """Check if current pose matches any saved poses"""
-        if not self.current_pose_signature:
+        # If tracking is disabled, release all keys and exit
+        if not self.tracking_enabled:
+            self.keyboard_mapper.release_all_keys()
             return
-            
+        
+        # Ensure we have a valid pose signature
+        if not self.current_pose_signature:
+            # Release all keys if no pose is detected
+            self.keyboard_mapper.release_all_keys()
+            return
+        
         # Update match percentage for selected pose
         self.update_match_percentage()
         
-        # Only check for triggers if tracking is enabled
-        if not self.tracking_enabled:
-            return
-            
         # Check if pose matches any saved poses and trigger keys if it does
         matched_pose = self.keyboard_mapper.check_pose(
             self.pose_detector, 
@@ -415,6 +420,7 @@ class MainWindow(QMainWindow):
         # Highlight matched pose in UI if there's a match
         if matched_pose:
             self.highlight_pose(matched_pose)
+    
 
     def highlight_pose(self, pose_id):
         """Highlight the matched pose in the UI"""
@@ -448,10 +454,15 @@ class MainWindow(QMainWindow):
         else:
             QMessageBox.warning(self, "Error", "Failed to capture camera image.")
 
-    def save_reviewed_pose(self, pose_name, key_combo, threshold=0.60):
-        """Save a pose after review with extra debugging"""
+    def save_reviewed_pose(self, name, key_combo, threshold, recognition_speed, immediate_release, sustained_duration):
+        """Save a pose after review with advanced configuration"""
         print("\nSAVING REVIEWED POSE:")
-        print(f"Name: {pose_name}, Key combo: {key_combo}, Threshold: {threshold}")
+        print(f"Name: {name}")
+        print(f"Key combo: {key_combo}")
+        print(f"Threshold: {threshold}")
+        print(f"Recognition Speed: {recognition_speed}")
+        print(f"Immediate Release: {immediate_release}")
+        print(f"Sustained Duration: {sustained_duration}")
         
         # Use the signature stored in the pose_review panel
         signature = getattr(self.pose_review, 'current_signature', None)
@@ -459,40 +470,33 @@ class MainWindow(QMainWindow):
         if not signature:
             # Fallback to the current signature
             signature = self.current_pose_signature
-            
-        print(f"Signature source: {'pose_review panel' if getattr(self.pose_review, 'current_signature', None) else 'current_pose_signature'}")
-        print(f"Signature type: {type(signature)}")
-        print(f"Signature available: {'Yes' if signature else 'No'}")
-        
-        if signature:
-            print(f"Signature length: {len(signature)}")
-            print("Signature points:")
-            for i, point in enumerate(signature):
-                print(f"  Point {i}: {point}")
         
         if not signature:
             QMessageBox.warning(self, "Warning", "Pose data lost! Please recapture.")
             return
-                
+        
         # Create poses directory if it doesn't exist
         if not os.path.exists("poses"):
             os.makedirs("poses")
-                
+        
         # Generate a unique filename
         image_path = f"poses/pose_{len(self.keyboard_mapper.pose_map)}.png"
         
-        # Save the current frame as an image - ensure we have a valid pixmap
+        # Save the current frame as an image
         if hasattr(self.pose_review, 'captured_image') and self.pose_review.captured_image:
             # Make another copy just to be safe
             save_pixmap = QPixmap(self.pose_review.captured_image)
             save_pixmap.save(image_path)
             
-            # Add mapping
+            # Add mapping with new parameters
             pose_id = self.keyboard_mapper.add_mapping(
-                pose_name,
-                signature,  # Use the stored signature
+                name,
+                signature,
                 key_combo,
-                threshold
+                threshold,
+                recognition_speed,
+                immediate_release,
+                sustained_duration
             )
             
             # Update the image path in the mapping
@@ -502,7 +506,7 @@ class MainWindow(QMainWindow):
             # Reload poses in the UI
             self.load_saved_poses()
             
-            QMessageBox.information(self, "Success", f"Pose '{pose_name}' mapped to '{key_combo}'")
+            QMessageBox.information(self, "Success", f"Pose '{name}' mapped to '{key_combo}'")
         else:
             QMessageBox.warning(self, "Error", "Failed to save image. Please try capturing again.")
 
@@ -579,29 +583,43 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Warning", "No pose selected!")
             return
                 
-        pose_data = self.keyboard_mapper.pose_map.get(self.selected_pose_id)
+        pose_data = self.keyboard_mapper.pose_map.get(str(self.selected_pose_id))
         if not pose_data:
             return
-                
-        # Get the threshold from pose_data or use default 0.60
+        
+        # Get all parameters with proper defaults
         threshold = pose_data.get("threshold", 0.60)
+        recognition_speed = pose_data.get("recognition_speed", 500)
+        immediate_release = pose_data.get("immediate_release", True)
+        sustained_duration = pose_data.get("sustained_duration", 0)
         
         dialog = PoseEditDialog(
             self.selected_pose_id,
             pose_data["name"],
             pose_data["key_combo"],
             pose_data.get("image_path"),
-            threshold,  # Pass the threshold to the dialog
+            threshold,
+            recognition_speed,
+            immediate_release,
+            sustained_duration,
             self
         )
         
         if dialog.exec_():
             updated_data = dialog.get_values()
-        
-            # Update the pose data
-            self.keyboard_mapper.pose_map[updated_data["pose_id"]]["name"] = updated_data["name"]
-            self.keyboard_mapper.pose_map[updated_data["pose_id"]]["key_combo"] = updated_data["key_combo"]
-            self.keyboard_mapper.pose_map[updated_data["pose_id"]]["threshold"] = updated_data["threshold"]
+            
+            # Update the pose data with ALL new configuration parameters
+            self.keyboard_mapper.pose_map[str(updated_data["pose_id"])] = {
+                "name": updated_data["name"],
+                "key_combo": updated_data["key_combo"],
+                "threshold": updated_data["threshold"],
+                "recognition_speed": updated_data["recognition_speed"],
+                "immediate_release": updated_data["immediate_release"],
+                "sustained_duration": updated_data["sustained_duration"],
+                # Preserve existing signature and image path
+                "signature": self.keyboard_mapper.pose_map[str(updated_data["pose_id"])].get("signature"),
+                "image_path": self.keyboard_mapper.pose_map[str(updated_data["pose_id"])].get("image_path")
+            }
             
             # Save changes
             self.keyboard_mapper.save_poses()
@@ -610,7 +628,7 @@ class MainWindow(QMainWindow):
             self.load_saved_poses()
             
             # Update the match percentage display if this is the currently selected pose
-            if self.selected_pose_id == updated_data["pose_id"]:
+            if str(self.selected_pose_id) == str(updated_data["pose_id"]):
                 self.update_match_percentage()
 
         # Add to MainWindow

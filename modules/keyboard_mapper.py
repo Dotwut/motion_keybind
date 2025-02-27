@@ -1,7 +1,8 @@
 from pynput.keyboard import Controller, Key
-from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt5.QtCore import QObject, pyqtSignal, QTimer
 import json
 import os
+import time
 
 class KeyboardMapper(QObject):
     key_triggered = pyqtSignal(str)
@@ -12,27 +13,138 @@ class KeyboardMapper(QObject):
         self.pose_map = {}  # Maps pose signatures to key combinations
         self.poses_dir = poses_dir
         
+        # Track currently pressed keys
+        self.currently_pressed_keys = set()
+        
+        # Timers for sustained key presses
+        self.key_timers = {}
+        
         # Create poses directory if it doesn't exist
         if not os.path.exists(poses_dir):
             os.makedirs(poses_dir)
             
         # Load existing poses
         self.load_poses()
+    
+    def trigger_key(self, pose_id, release_only=False):
+        """Trigger a keyboard combination with enhanced configuration options"""
+        # If pose_id is a string representation of a pose, convert it
+        if isinstance(pose_id, str):
+            pose_data = self.pose_map.get(pose_id, {})
+        else:
+            # Assume it's a direct pose dictionary
+            pose_data = pose_id
+            pose_id = self._find_pose_id_by_key_combo(pose_data.get('key_combo'))
         
-    def add_mapping(self, pose_name, pose_signature, key_combo, threshold=0.75):
-        """Add a mapping between a pose signature and keys with detailed debugging"""
-        # Debug info about the signature being saved
+        key_combo = pose_data.get('key_combo', '')
+        
+        print(f"\n--- {'RELEASING' if release_only else 'TRIGGERING'} KEY: {key_combo} ---")
+        
+        try:
+            keys = key_combo.split('+')
+            
+            # Determine key press behavior based on pose configuration
+            immediate_release = pose_data.get('immediate_release', True)
+            sustained_duration = pose_data.get('sustained_duration', 0)
+            
+            # Press keys
+            if not release_only:
+                for key in keys:
+                    key = key.strip().lower()
+                    # Only press if not already pressed
+                    if key not in self.currently_pressed_keys:
+                        self._press_single_key(key)
+                        self.currently_pressed_keys.add(key)
+                
+                # Handle sustained key press if configured
+                if not immediate_release and sustained_duration > 0:
+                    self._setup_key_timer(key_combo, sustained_duration)
+            
+            # Release keys if immediate release is enabled
+            if immediate_release or release_only:
+                for key in reversed(keys):
+                    key = key.strip().lower()
+                    if key in self.currently_pressed_keys:
+                        self._release_single_key(key)
+                        self.currently_pressed_keys.discard(key)
+            
+            print(f"--- KEY COMBINATION {key_combo} {'RELEASED' if release_only else 'TRIGGERED'} SUCCESSFULLY ---")
+        except Exception as e:
+            print(f"CRITICAL ERROR {'releasing' if release_only else 'triggering'} key combination {key_combo}: {e}")
+    
+    def _press_single_key(self, key):
+        """Press a single key with error handling"""
+        try:
+            if key in ['ctrl', 'alt', 'shift']:
+                self.keyboard.press(getattr(Key, key))
+            elif key.startswith('f') and key[1:].isdigit() and 1 <= int(key[1:]) <= 24:
+                self.keyboard.press(getattr(Key, key))
+            elif key.startswith('num') and key[3:].isdigit():
+                self.keyboard.press(getattr(Key, f'num_{key[3:]}'))
+            elif len(key) == 1:
+                self.keyboard.press(key)
+            else:
+                self.keyboard.press(getattr(Key, key))
+        except Exception as e:
+            print(f"Error pressing key '{key}': {e}")
+    
+    def _release_single_key(self, key):
+        """Release a single key with error handling"""
+        try:
+            if key in ['ctrl', 'alt', 'shift']:
+                self.keyboard.release(getattr(Key, key))
+            elif key.startswith('f') and key[1:].isdigit() and 1 <= int(key[1:]) <= 24:
+                self.keyboard.release(getattr(Key, key))
+            elif key.startswith('num') and key[3:].isdigit():
+                self.keyboard.release(getattr(Key, f'num_{key[3:]}'))
+            elif len(key) == 1:
+                self.keyboard.release(key)
+            else:
+                self.keyboard.release(getattr(Key, key))
+        except Exception as e:
+            print(f"Error releasing key '{key}': {e}")
+    
+    def _setup_key_timer(self, key_combo, duration):
+        """Set up a timer to release keys after a specified duration"""
+        # Cancel any existing timer for this key combo
+        if key_combo in self.key_timers:
+            existing_timer = self.key_timers[key_combo]
+            existing_timer.stop()
+            existing_timer.deleteLater()
+        
+        # Create a new timer
+        timer = QTimer()
+        timer.setSingleShot(True)
+        
+        # Create a lambda that captures the key_combo
+        timer.timeout.connect(lambda: self.trigger_key(self._find_pose_id_by_key_combo(key_combo), release_only=True))
+        
+        # Start the timer
+        timer.start(int(duration * 1000))  # Convert to milliseconds
+        
+        # Store the timer
+        self.key_timers[key_combo] = timer
+
+    def _find_pose_id_by_key_combo(self, key_combo):
+        """Find the pose ID associated with a given key combination"""
+        for pose_id, pose_data in self.pose_map.items():
+            if pose_data.get('key_combo') == key_combo:
+                return pose_id
+        return None
+    
+    def add_mapping(self, pose_name, pose_signature, key_combo, 
+                    threshold=0.75, 
+                    recognition_speed=500,  # ms between pose checks
+                    immediate_release=True, 
+                    sustained_duration=0):
+        """Add a mapping with advanced configuration options"""
         print("\nSAVING NEW POSE:")
         print(f"Pose Name: {pose_name}")
         print(f"Key Combo: {key_combo}")
         print(f"Threshold: {threshold}")
-        print(f"Signature Type: {type(pose_signature)}")
-        print(f"Signature Length: {len(pose_signature) if pose_signature else 'None'}")
-        
-        if pose_signature:
-            print("Signature Points:")
-            for i, point in enumerate(pose_signature):
-                print(f"  Point {i}: {point}")
+        print(f"Recognition Speed: {recognition_speed}ms")
+        print(f"Immediate Release: {immediate_release}")
+        print(f"Sustained Duration: {sustained_duration}s")
         
         # Create a deep copy to prevent reference issues
         if pose_signature:
@@ -46,73 +158,21 @@ class KeyboardMapper(QObject):
             "signature": saved_signature,
             "key_combo": key_combo,
             "threshold": threshold,
+            "recognition_speed": recognition_speed,
+            "immediate_release": immediate_release,
+            "sustained_duration": sustained_duration,
             "image_path": None
         }
         self.save_poses()
         
         print(f"Saved pose with ID: {pose_id}")
         return pose_id
-        
-    def remove_mapping(self, pose_id):
-        """Remove a pose mapping"""
-        if pose_id in self.pose_map:
-            del self.pose_map[pose_id]
-            self.save_poses()
-    
-    def trigger_key(self, key_combo):
-        """Trigger a keyboard combination"""
-        try:
-            keys = key_combo.split('+')
-            
-            # Press all keys in the combination
-            for key in keys:
-                key = key.strip().lower()
-                if key in ['ctrl', 'alt', 'shift']:
-                    self.keyboard.press(getattr(Key, key))
-                elif key.startswith('f') and key[1:].isdigit() and 1 <= int(key[1:]) <= 24:
-                    self.keyboard.press(getattr(Key, key))
-                elif key.startswith('num') and key[3:].isdigit():
-                    # Handle numpad keys
-                    self.keyboard.press(getattr(Key, f'num_{key[3:]}'))
-                elif len(key) == 1:
-                    # Single character keys
-                    self.keyboard.press(key)
-                else:
-                    # Try to find the key in Key enum
-                    try:
-                        self.keyboard.press(getattr(Key, key))
-                    except AttributeError:
-                        # If not found, just press it as a regular key
-                        self.keyboard.press(key)
-                    
-            # Release all keys
-            for key in reversed(keys):
-                key = key.strip().lower()
-                if key in ['ctrl', 'alt', 'shift']:
-                    self.keyboard.release(getattr(Key, key))
-                elif key.startswith('f') and key[1:].isdigit() and 1 <= int(key[1:]) <= 24:
-                    self.keyboard.release(getattr(Key, key))
-                elif key.startswith('num') and key[3:].isdigit():
-                    # Handle numpad keys
-                    self.keyboard.release(getattr(Key, f'num_{key[3:]}'))
-                elif len(key) == 1:
-                    # Single character keys
-                    self.keyboard.release(key)
-                else:
-                    # Try to find the key in Key enum
-                    try:
-                        self.keyboard.release(getattr(Key, key))
-                    except AttributeError:
-                        # If not found, just release it as a regular key
-                        self.keyboard.release(key)
-        except Exception as e:
-            print(f"Error triggering key combination {key_combo}: {e}")
 
-                
     def check_pose(self, pose_detector, current_signature):
-        """Check if a pose matches any known mappings and trigger keys with better debugging"""
+        """Check if a pose matches any known mappings with advanced pose tracking"""
         if not current_signature:
-            print("No current pose signature to check")
+            # If no current signature, release all keys
+            self.release_all_keys()
             return None
         
         print(f"\nCHECKING CURRENT POSE against {len(self.pose_map)} saved poses")
@@ -148,15 +208,30 @@ class KeyboardMapper(QObject):
         
         if best_match:
             print(f"FOUND BEST MATCH: {best_match} with score {best_score:.4f}")
+            
             # Trigger the key
-            self.key_triggered.emit(self.pose_map[best_match]["key_combo"])
-            self.trigger_key(self.pose_map[best_match]["key_combo"])
+            key_combo = self.pose_map[best_match]["key_combo"]
+            self.key_triggered.emit(key_combo)
+            
+            # Check if this is a movement pose
+            if len(key_combo) == 1 and key_combo.lower() in 'wasd':
+                # Special handling for movement keys
+                # Only press the key if it's not already pressed
+                if key_combo not in self.currently_pressed_keys:
+                    self.trigger_key(best_match)
+            else:
+                # Regular key triggering for other types of poses
+                self.trigger_key(best_match)
+            
             return best_match
         
+        # If no match found, release all keys
+        self.release_all_keys()
         print(f"No matching pose found. Best score was {best_score:.4f}")
         return None
 
-        
+    # Existing methods like save_poses, load_poses remain the same
+   
     def save_poses(self):
         """Save all pose mappings to file with proper JSON serialization"""
         print("\nSAVING POSES TO FILE:")
@@ -171,12 +246,12 @@ class KeyboardMapper(QObject):
             # Convert tuple signatures to lists for JSON serialization
             if pose_copy.get("signature"):
                 pose_copy["signature"] = [list(point) for point in pose_copy["signature"]]
-                
+            
             serializable_map[pose_id] = pose_copy
             
-            print(f"Pose {pose_id} ({pose_data.get('name', 'unnamed')}):")
-            print(f"  Original signature type: {type(pose_data.get('signature'))}")
-            print(f"  Serialized signature type: {type(pose_copy.get('signature'))}")
+            print(f"Saving Pose {pose_id} ({pose_data.get('name', 'unnamed')}):")
+            for key, value in pose_copy.items():
+                print(f"  {key}: {value}")
         
         # Save to file
         try:
@@ -218,6 +293,77 @@ class KeyboardMapper(QObject):
         else:
             print("No poses file found. Starting with empty pose map.")
             self.pose_map = {}
+
+    def add_mapping(self, pose_name, pose_signature, key_combo, 
+                    threshold=0.75, 
+                    recognition_speed=500,
+                    immediate_release=True, 
+                    sustained_duration=0):
+        """Add a mapping with advanced configuration options"""
+        print("\nSAVING NEW POSE:")
+        print(f"Pose Name: {pose_name}")
+        print(f"Key Combo: {key_combo}")
+        print(f"Threshold: {threshold}")
+        print(f"Recognition Speed: {recognition_speed}ms")
+        print(f"Immediate Release: {immediate_release}")
+        print(f"Sustained Duration: {sustained_duration}s")
+        
+        # Create a deep copy to prevent reference issues
+        if pose_signature:
+            saved_signature = [tuple(point) for point in pose_signature]
+        else:
+            saved_signature = None
+        
+        pose_id = str(len(self.pose_map))
+        self.pose_map[pose_id] = {
+            "name": pose_name,
+            "signature": saved_signature,
+            "key_combo": key_combo,
+            "threshold": threshold,
+            "recognition_speed": recognition_speed,
+            "immediate_release": immediate_release,
+            "sustained_duration": sustained_duration,
+            "image_path": None
+        }
+        self.save_poses()
+        
+        print(f"Saved pose with ID: {pose_id}")
+        return pose_id
+    
+    def remove_mapping(self, pose_id):
+        """Remove a pose mapping"""
+        print(f"\nREMOVING POSE: {pose_id}")
+        
+        if pose_id in self.pose_map:
+            # Log the details of the pose being removed
+            pose_data = self.pose_map[pose_id]
+            print(f"Pose Name: {pose_data.get('name', 'Unnamed Pose')}")
+            print(f"Key Combo: {pose_data.get('key_combo', 'N/A')}")
+            
+            # Remove the pose from the map
+            del self.pose_map[pose_id]
+            
+            # Save the updated poses
+            self.save_poses()
+            
+            print(f"Pose {pose_id} removed successfully")
+        else:
+            print(f"No pose found with ID: {pose_id}")
+
+    def release_all_keys(self):
+        """Release all currently pressed keys"""
+        print("\n--- RELEASING ALL KEYS ---")
+        
+        # Create a copy of the currently pressed keys to avoid modifying the set during iteration
+        for key_combo in list(self.currently_pressed_keys):
+            try:
+                print(f"Releasing key combination: {key_combo}")
+                self.trigger_key(key_combo, release_only=True)
+            except Exception as e:
+                print(f"Error releasing key {key_combo}: {e}")
+        
+        # Clear the set of currently pressed keys
+        self.currently_pressed_keys.clear()
 
 def validate_keybind(keybind):
     """Validate the entered keybind to ensure it is supported."""

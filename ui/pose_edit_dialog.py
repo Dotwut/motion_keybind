@@ -1,19 +1,31 @@
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
-                            QPushButton, QLineEdit, QMessageBox, QSlider)
+                            QPushButton, QLineEdit, QMessageBox, QSlider, 
+                            QCheckBox, QSpinBox, QDoubleSpinBox)
 from PyQt5.QtGui import QPixmap
 from PyQt5.QtCore import Qt
 
 class PoseEditDialog(QDialog):
-    def __init__(self, pose_id, pose_name, key_combo, image_path, threshold=0.60, parent=None):
-        super().__init__(parent)
-        self.pose_id = pose_id
-        self.pose_name = pose_name
-        self.key_combo = key_combo
+    def __init__(self, pose_id, pose_name, key_combo, image_path, 
+                threshold=0.60, 
+                recognition_speed=500, 
+                immediate_release=True, 
+                sustained_duration=0, 
+                parent=None):
+        # Ensure all parameters are of the correct type
+        self.pose_id = str(pose_id)
+        self.pose_name = str(pose_name)
+        self.key_combo = str(key_combo)
         self.image_path = image_path
-        self.threshold = threshold
+        self.threshold = float(threshold)
+        self.recognition_speed = int(recognition_speed)  # Explicitly convert to int
+        self.immediate_release = bool(immediate_release)
+        self.sustained_duration = float(sustained_duration)
+        
+        # Call the parent constructor with the parent widget
+        super().__init__(parent)
         
         self.setWindowTitle("Edit Pose")
-        self.resize(400, 350)
+        self.resize(500, 500)
         self.setup_ui()
         
     def setup_ui(self):
@@ -45,34 +57,64 @@ class PoseEditDialog(QDialog):
         key_layout.addWidget(self.key_input)
         layout.addLayout(key_layout)
         
-        # Threshold slider - using the whole range for flexibility
+        # Matching Threshold
         threshold_layout = QHBoxLayout()
         threshold_layout.addWidget(QLabel("Matching Threshold:"))
         self.threshold_slider = QSlider(Qt.Horizontal)
-        
-        # Range from 10% to 90% with proper initial value
         self.threshold_slider.setMinimum(10)
         self.threshold_slider.setMaximum(90)
+        self.threshold_slider.setValue(int(self.threshold * 100))
         
-        # Convert threshold from 0.0-1.0 to percentage for the slider
-        threshold_percent = int(self.threshold * 100)
-        self.threshold_slider.setValue(threshold_percent)
-
-        # Display current value
-        self.threshold_value = QLabel(f"{threshold_percent}%")
+        self.threshold_value = QLabel(f"{int(self.threshold * 100)}%")
         self.threshold_slider.valueChanged.connect(
             lambda v: self.threshold_value.setText(f"{v}%")
         )
+        
         threshold_layout.addWidget(self.threshold_slider)
         threshold_layout.addWidget(self.threshold_value)
         layout.addLayout(threshold_layout)
         
-        # Add explanation
-        threshold_explanation = QLabel(
-            "Lower values require more precise matching. Higher values are more forgiving."
+        # Recognition Speed
+        speed_layout = QHBoxLayout()
+        speed_layout.addWidget(QLabel("Recognition Speed (ms):"))
+        self.speed_input = QSpinBox()
+        self.speed_input.setRange(100, 2000)
+        self.speed_input.setSingleStep(50)
+        self.speed_input.setValue(self.recognition_speed)
+        speed_layout.addWidget(self.speed_input)
+        layout.addLayout(speed_layout)
+        
+        # Immediate Release Option
+        release_layout = QHBoxLayout()
+        self.immediate_release_check = QCheckBox("Immediate Key Release")
+        self.immediate_release_check.setChecked(self.immediate_release)
+        release_layout.addWidget(self.immediate_release_check)
+        layout.addLayout(release_layout)
+        
+        # Sustained Duration
+        duration_layout = QHBoxLayout()
+        duration_layout.addWidget(QLabel("Sustained Key Duration (seconds):"))
+        self.duration_input = QDoubleSpinBox()
+        self.duration_input.setRange(0, 10)
+        self.duration_input.setSingleStep(0.1)
+        self.duration_input.setValue(self.sustained_duration)
+        self.duration_input.setEnabled(not self.immediate_release_check.isChecked())
+        duration_layout.addWidget(self.duration_input)
+        layout.addLayout(duration_layout)
+        
+        # Enable/Disable duration input based on immediate release
+        self.immediate_release_check.toggled.connect(
+            lambda checked: self.duration_input.setEnabled(not checked)
         )
-        threshold_explanation.setWordWrap(True)
-        layout.addWidget(threshold_explanation)
+        
+        # Explanatory text
+        explanation = QLabel(
+            "Matching Threshold: Lower values require more precise matching.\n"
+            "Recognition Speed: Time between pose checks (ms).\n"
+            "Immediate Release: If unchecked, key will be held for specified duration."
+        )
+        explanation.setWordWrap(True)
+        layout.addWidget(explanation)
         
         # Buttons
         button_layout = QHBoxLayout()
@@ -91,7 +133,10 @@ class PoseEditDialog(QDialog):
             "pose_id": self.pose_id,
             "name": self.name_input.text(),
             "key_combo": self.key_input.text(),
-            "threshold": self.threshold_slider.value() / 100.0
+            "threshold": self.threshold_slider.value() / 100.0,
+            "recognition_speed": self.speed_input.value(),
+            "immediate_release": self.immediate_release_check.isChecked(),
+            "sustained_duration": self.duration_input.value()
         }
     
     def accept(self):
